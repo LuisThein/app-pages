@@ -5,7 +5,7 @@ Static GitHub Pages site for public app pages such as privacy policy, support, a
 ## Structure
 
 - `index.html`: landing page for all app pages
-- `never-havi-i-ever/`: public pages for the Never Havi I Ever app
+- `never-havi-i-ever/`: public pages for the Never Have I Ever app
 
 ## Publish with GitHub Pages
 
