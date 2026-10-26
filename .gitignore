@@ -13,3 +13,6 @@
 .env.*
 !.env.example
 
+
+# codebase-memory-mcp snapshot (index stays in ~/.cache)
+.codebase-memory/

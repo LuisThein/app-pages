@@ -7,6 +7,15 @@
 #   wiki-sync.sh --rewritten  reads "old new" pairs (post-rewrite) from stdin,
 #                             removes the entries of the replaced commits,
 #                             then adds the missing ones
+#   wiki-sync.sh --stamp      only records the computer (see below), e.g. at
+#                             the end of a session without a commit
+#   wiki-sync.sh --pushed     only records the computer, with 0 unpushed
+#                             commits (pre-push)
+#
+# Every run also records in "00 Übersicht.md" (section "## Zuletzt bearbeitet",
+# one row per repo) on which computer the repo was changed last, when, and how
+# many commits and files exist only there. This goes to the vault only, never
+# into the repo. $WIKI_NO_STAMP=1 skips it, $WIKI_COMPUTER overrides the name.
 #
 # Configuration (set by scripts/setup.sh):
 #   wiki.vaultPath  vault root ($WIKI_VAULT_PATH overrides it)
@@ -31,6 +40,56 @@ vault="${WIKI_VAULT_PATH:-$(git config --get wiki.vaultPath)}"
 project=$(git config --get wiki.project)
 prefix=$(git config --get wiki.prefix)
 [ -n "$vault" ] && [ -n "$project" ] && [ -n "$prefix" ] || exit 0
+
+# Records the computer in "00 Übersicht.md". Never fails the hook.
+stamp() {
+    [ "${WIKI_NO_STAMP:-}" = 1 ] && return 0
+    local overview="$vault/Projekte/$project/00 Übersicht.md"
+    if [ ! -f "$overview" ]; then
+        echo "wiki-sync: WARNING: overview not found, computer not recorded: $overview" >&2
+        return 0
+    fi
+    local repo computer when unpushed dirty row tmp
+    repo=$(basename "$(git rev-parse --show-toplevel)")
+    computer="${WIKI_COMPUTER:-$(scutil --get ComputerName 2>/dev/null || hostname -s)}"
+    computer=$(printf '%s' "$computer" | tr -d '|')
+    when=$(date '+%Y-%m-%d %H:%M')
+    if [ "${1:-}" = pushed ]; then
+        unpushed=0
+    else
+        unpushed=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null) || unpushed="kein Upstream"
+    fi
+    dirty=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+    row="| \`$repo\` | $computer | $when | $unpushed | $dirty |"
+    tmp=$(mktemp) || return 0
+    awk -v head="## Zuletzt bearbeitet" -v key="| \`$repo\` |" -v row="$row" '
+        function emit(   i) {
+            print head
+            print ""
+            print "Automatisch per Git-Hook (`scripts/wiki-sync.sh`). Sitzungen dort starten, wo der neueste Stand liegt: Ungepusht/Uncommittet > 0 heißt, der Stand liegt nur auf diesem Rechner."
+            print ""
+            print "| Repo | Rechner | Stand | Ungepusht | Uncommittet |"
+            print "| --- | --- | --- | --- | --- |"
+            for (i = 1; i <= n; i++) print rows[i]
+            print row
+            print ""
+            emitted = 1
+        }
+        $0 == head { insec = 1; next }
+        insec && /^## / { insec = 0; emit() }
+        insec { if (index($0, "| `") == 1 && index($0, key) != 1) rows[++n] = $0; next }
+        { print }
+        END { if (insec) emit(); else if (!emitted) { print ""; emit() } }
+    ' "$overview" > "$tmp" && cat "$tmp" > "$overview" ||
+        echo "wiki-sync: WARNING: computer not recorded in $overview" >&2
+    rm -f "$tmp"
+}
+
+case "${1:-}" in
+    --stamp) stamp; exit 0 ;;
+    --pushed) stamp pushed; exit 0 ;;
+    *) stamp ;;
+esac
 
 changelog="$vault/Projekte/$project/Changelog.md"
 marker="%% $prefix:commits %%"
